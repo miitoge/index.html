@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AR Smart Shopping Prototype</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #121212;
+      color: white;
+      font-family: sans-serif;
+      overflow: hidden;
+    }
+
+    /* カメラビューファインダー */
+    .container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    video, img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* 検出枠（ピンク） */
+    .target-box {
+      position: absolute;
+      top: 15%;
+      left: 38%;
+      width: 24%;
+      height: 30%;
+      border: 4px solid #ff00ff;
+      border-radius: 8px;
+      box-shadow: 0 0 15px rgba(255, 0, 255, 0.5);
+      pointer-events: none;
+    }
+
+    /* 左側：口コミパネル */
+    .review-panel {
+      position: absolute;
+      top: 10%;
+      left: 5%;
+      width: 30%;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(5px);
+      padding: 15px;
+      border-radius: 12px;
+      font-size: 14px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+    }
+
+    .review-panel h3 { margin: 0 0 10px 0; font-size: 16px; color: #fff; }
+    .positive { color: #4caf50; font-weight: bold; }
+    .negative { color: #f44336; font-weight: bold; margin-top: 10px; }
+
+    /* 右側：商品情報 & 比較パネル */
+    .info-panel {
+      position: absolute;
+      top: 10%;
+      right: 5%;
+      width: 35%;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(5px);
+      padding: 15px;
+      border-radius: 12px;
+    }
+
+    .title-area {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #444;
+      padding-bottom: 8px;
+      margin-bottom: 12px;
+    }
+
+    .title-area h2 { margin: 0; font-size: 18px; }
+    .stars { color: #ffd700; }
+
+    .compare-section h4 { margin: 5px 0; font-size: 14px; color: #ccc; }
+    .compare-grid {
+      display: flex;
+      gap: 8px;
+    }
+
+    .compare-card {
+      flex: 1;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid #666;
+      border-radius: 6px;
+      padding: 6px;
+      text-align: center;
+      font-size: 11px;
+    }
+
+    .compare-card.active {
+      border-color: #ff00ff;
+    }
+
+    .compare-card img {
+      width: 100%;
+      height: 40px;
+      object-fit: contain;
+      background: #fff;
+      border-radius: 4px;
+    }
+
+    /* 操作ボタン */
+    .controls {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 15px;
+    }
+
+    button {
+      padding: 12px 24px;
+      background: #ff00ff;
+      border: none;
+      color: white;
+      font-weight: bold;
+      border-radius: 25px;
+      cursor: pointer;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- カメラ映像 -->
+  <video id="webcam" autoplay playsinline></video>
+
+  <!-- ARオーバーレイ要素（スキャン時に表示） -->
+  <div id="ar-overlay" style="display: none;">
+    <!-- 認識フレーム -->
+    <div class="target-box"></div>
+
+    <!-- 左：口コミ -->
+    <div class="review-panel">
+      <h3>▼口コミ</h3>
+      <div class="positive">★肯定的なレビュー</div>
+      <p>「一口サイズで食べやすい！サクサクで美味しい。」<br>「チョコとパンの相性が抜群。」</p>
+      
+      <div class="negative">☆否定的なレビュー</div>
+      <p>「少しパサつきが気になるかも。」<br>「内容量がもう少し欲しい。」</p>
+    </div>
+
+    <!-- 右：商品詳細・比較 -->
+    <div class="info-panel">
+      <div class="title-area">
+        <h2>チョコあ～んぱん</h2>
+        <div class="stars">★★★★★</div>
+      </div>
+
+      <div class="compare-section">
+        <h4>▼比較を選択</h4>
+        <div class="compare-grid">
+          <div class="compare-card active">
+            <div style="height:40px; background:#eee; color:#333; line-height:40px;">画像</div>
+            <p>チョコあ～んぱん<br><b>¥108</b></p>
+          </div>
+          <div class="compare-card">
+            <div style="height:40px; background:#eee; color:#333; line-height:40px;">画像</div>
+            <p>たけのこの里<br><b>¥200</b></p>
+          </div>
+          <div class="compare-card">
+            <div style="height:40px; background:#eee; color:#333; line-height:40px;">画像</div>
+            <p>コアラのマーチ<br><b>¥120</b></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 操作ボタン -->
+  <div class="controls">
+    <button onclick="toggleScan()">商品をスキャン (ON/OFF)</button>
+  </div>
+</div>
+
+<script>
+  // カメラの起動
+  const video = document.getElementById('webcam');
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+    .then(stream => { video.srcObject = stream; })
+    .catch(err => { console.error("カメラの起動に失敗しました:", err); });
+
+  // デモ用の表示切り替え
+  let isScanned = false;
+  function toggleScan() {
+    isScanned = !isScanned;
+    document.getElementById('ar-overlay').style.display = isScanned ? 'block' : 'none';
+  }
+</script>
+
+</body>
+</html>
