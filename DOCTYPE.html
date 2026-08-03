@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AR Tracking Simple</title>
   
-  <!-- AIライブラリ（Safariでも確実に動くCOCO-SSD） -->
+  <!-- AIライブラリ（Safari対応） -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 
@@ -32,7 +32,7 @@
       z-index: 1;
     }
 
-    /* トラッキング枠を描く透明キャンバス */
+    /* トラッキング枠を描くキャンバス */
     canvas {
       position: absolute;
       top: 0; left: 0;
@@ -56,11 +56,15 @@
 
   let model = null;
 
-  // 1. カメラ起動（Safari対応）
+  // 1. カメラ起動
   async function startCamera() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: { 
+          facingMode: "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
         audio: false
       });
       video.srcObject = stream;
@@ -70,35 +74,65 @@
     }
   }
 
-  // 2. リアルタイム追従（四角い枠の描画のみ）
+  // 2. リアルタイム・トラッキング描画処理
   async function predictLoop() {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    // キャンバス解像度を画面表示サイズと完全一致させる
+    if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
 
     if (model && video.readyState === 4) {
+      // AIで物体位置を判定
       const predictions = await model.detect(video);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       if (predictions.length > 0) {
+        // 最も確信度の高い物体を追従対象に選定
         const obj = predictions[0];
         
-        // 座標変換
-        const scaleX = canvas.width / video.videoWidth;
-        const scaleY = canvas.height / video.videoHeight;
-        const x = obj.bbox[0] * scaleX;
-        const y = obj.bbox[1] * scaleY;
+        // --- 画面全画面（object-fit: cover）に対する正確な位置追従計算 ---
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const cw = canvas.width;
+        const ch = canvas.height;
+
+        const videoRatio = vw / vh;
+        const canvasRatio = cw / ch;
+
+        let renderWidth, renderHeight, offsetX, offsetY;
+
+        if (canvasRatio > videoRatio) {
+          renderWidth = cw;
+          renderHeight = cw / videoRatio;
+          offsetX = 0;
+          offsetY = (ch - renderHeight) / 2;
+        } else {
+          renderWidth = ch * videoRatio;
+          renderHeight = ch;
+          offsetX = (cw - renderWidth) / 2;
+          offsetY = 0;
+        }
+
+        const scaleX = renderWidth / vw;
+        const scaleY = renderHeight / vh;
+
+        // 動く物体のリアルタイム座標（X, Y, 幅, 高さ）
+        const x = obj.bbox[0] * scaleX + offsetX;
+        const y = obj.bbox[1] * scaleY + offsetY;
         const w = obj.bbox[2] * scaleX;
         const h = obj.bbox[3] * scaleY;
 
-        // --- 動くメイン枠（ピンク） ---
+        // --- 動くトラッキング枠（メイン：ピンク） ---
         ctx.strokeStyle = '#ff00ff';
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, w, h);
 
-        // --- AR角枠アクセント（シアン） ---
-        const len = 15;
+        // --- 動くAR角枠アクセント（シアン） ---
+        const len = Math.min(w, h) * 0.2; // 枠サイズに合わせて角枠の長さも可変
         ctx.strokeStyle = '#00ffcc';
         ctx.lineWidth = 4;
+
         // 左上
         ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
         // 右上
