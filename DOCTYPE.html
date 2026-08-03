@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AR Tracking</title>
+  <title>AR Tracking Simple</title>
   
-  <!-- AIライブラリ（TensorFlow.js + COCO-SSD） -->
+  <!-- AIライブラリ（Safariでも確実に動くCOCO-SSD） -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 
@@ -56,7 +56,7 @@
 
   let model = null;
 
-  // 1. カメラ起動（元コードのまま）
+  // 1. カメラ起動（Safari対応）
   async function startCamera() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -66,11 +66,11 @@
       video.srcObject = stream;
       await new Promise((resolve) => { video.onloadeddata = () => resolve(); });
     } catch (e) {
-      console.error("カメラの起動に失敗しました");
+      console.error("カメラ起動エラー", e);
     }
   }
 
-  // 2. リアルタイム追従（元コードから枠描画のみを残して削除）
+  // 2. リアルタイム追従（四角い枠の描画のみ）
   async function predictLoop() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -90,19 +90,19 @@
         const w = obj.bbox[2] * scaleX;
         const h = obj.bbox[3] * scaleY;
 
-        // --- 動くトラッキング枠（元コードのピンク＆シアン枠） ---
+        // --- 動くメイン枠（ピンク） ---
         ctx.strokeStyle = '#ff00ff';
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, w, h);
 
-        // AR角枠
+        // --- AR角枠アクセント（シアン） ---
         const len = 15;
         ctx.strokeStyle = '#00ffcc';
         ctx.lineWidth = 4;
         // 左上
         ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
         // 右上
-        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w); ctx.lineTo(x + w, y + len); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
         // 左下
         ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
         // 右下
@@ -112,13 +112,13 @@
     requestAnimationFrame(predictLoop);
   }
 
-  // アプリ起動（元コードのまま）
+  // アプリ起動
   async function main() {
     await startCamera();
     try {
       model = await cocoSsd.load();
     } catch (e) {
-      console.error("AIモデルの読み込みに失敗しました");
+      console.error("AIモデル読み込みエラー", e);
     }
     predictLoop();
   }
