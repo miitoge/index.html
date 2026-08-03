@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AR Tracking Simple</title>
+  <title>AR Object Detection</title>
   
   <!-- AIライブラリ（Safari対応） -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
@@ -32,13 +32,13 @@
       z-index: 1;
     }
 
-    /* トラッキング枠を描くキャンバス */
+    /* トラッキング枠と文字を描く透明キャンバス */
     canvas {
       position: absolute;
       top: 0; left: 0;
       width: 100vw; height: 100vh;
       z-index: 2;
-      pointer-events: none;
+      pointer-events: none; /* タッチイベントを下のvideoに通す */
     }
   </style>
 </head>
@@ -61,7 +61,7 @@
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { 
-          facingMode: "environment",
+          facingMode: "environment", // 背面カメラ
           width: { ideal: 1280 },
           height: { ideal: 720 }
         },
@@ -71,19 +71,23 @@
       await new Promise((resolve) => { video.onloadeddata = () => resolve(); });
     } catch (e) {
       console.error("カメラ起動エラー", e);
+      alert("カメラの起動に失敗しました。設定を確認してください。");
     }
   }
 
-  // 2. リアルタイム・トラッキング描画処理
+  // 2. リアルタイム・トラッキング＆描画処理
   async function predictLoop() {
+    // キャンバスサイズを画面表示サイズに合わせる
     if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     }
 
     if (model && video.readyState === 4) {
-      // 検出感度を少し上げて（0.35以上）細かく探す
-      const predictions = await model.detect(video, 10, 0.35);
+      // AI物体検出を実行（最大検出数:5, しきい値:0.4）
+      const predictions = await model.detect(video, 5, 0.4);
+      
+      // 描画をクリア
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       const vw = video.videoWidth;
@@ -96,6 +100,7 @@
 
       let renderWidth, renderHeight, offsetX, offsetY;
 
+      // object-fit: cover の計算
       if (canvasRatio > videoRatio) {
         renderWidth = cw;
         renderHeight = cw / videoRatio;
@@ -111,38 +116,55 @@
       const scaleX = renderWidth / vw;
       const scaleY = renderHeight / vh;
 
-      // 画面全体に対するサイズの割合を計算して「巨大すぎる枠（棚全体）」を除外するフィルタリング
+      // フィルタリング: でかすぎる枠（棚全体など）を除外 (画面面積の60%以上は除外)
       const validObjects = predictions.filter(obj => {
         const areaRatio = (obj.bbox[2] * obj.bbox[3]) / (vw * vh);
-        // 画面の50%以上を占める枠（棚や人間など）は除外
-        return areaRatio < 0.50;
+        return areaRatio < 0.60;
       });
 
-      // 検出された商品（最大3つまで）に枠を描画
-      const targets = validObjects.slice(0, 3);
+      // 描画設定（フォントなど）
+      ctx.font = 'bold 16px sans-serif';
+      ctx.textBaseline = 'top';
 
-      targets.forEach(obj => {
+      validObjects.forEach(obj => {
+        // 認識した名前（英語）
+        const label = obj.class.toUpperCase();
+        
+        // トラッキング座標を計算
         const x = obj.bbox[0] * scaleX + offsetX;
         const y = obj.bbox[1] * scaleY + offsetY;
         const w = obj.bbox[2] * scaleX;
         const h = obj.bbox[3] * scaleY;
 
-        // --- トラッキング枠（メイン：ピンク） ---
+        // --- 1. 四角いトラッキング枠（ピンク） ---
         ctx.strokeStyle = '#ff00ff';
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, w, h);
 
-        // --- AR角枠アクセント（シアン） ---
-        const len = Math.min(w, h) * 0.25;
+        // --- 2. AR角枠アクセント（シアン） ---
+        const len = Math.min(w, h) * 0.2; // 角枠の長さ
         ctx.strokeStyle = '#00ffcc';
         ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke(); // 左上
+        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w); ctx.lineTo(x + w, y + len); ctx.stroke(); // 右上
+        ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke(); // 左下
+        ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w); ctx.lineTo(x + w, y + h - len); ctx.stroke(); // 右下
 
-        ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w); ctx.lineTo(x + w, y + len); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w); ctx.lineTo(x + w, y + h - len); ctx.stroke();
+        // --- 3. 認識した名前のテキスト表示（ピンク背景に白文字） ---
+        const textWidth = ctx.measureText(label).width;
+        const textHeight = 20; // ざっくりした高さ
+
+        // 文字の背景を描画
+        ctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+        // 枠の左上に配置。枠からはみ出さないよう微調整
+        ctx.fillRect(x, y - textHeight - 3, textWidth + 10, textHeight + 3);
+
+        // 文字本体を描画
+        ctx.fillStyle = '#ffffff'; // 白文字
+        ctx.fillText(label, x + 5, y - textHeight);
       });
     }
+    // 次のフレームへ
     requestAnimationFrame(predictLoop);
   }
 
@@ -150,13 +172,16 @@
   async function main() {
     await startCamera();
     try {
+      // AIモデルのロード
       model = await cocoSsd.load();
     } catch (e) {
       console.error("AIモデル読み込みエラー", e);
     }
+    // ループ開始
     predictLoop();
   }
 
+  // ページ読み込み時に実行
   window.onload = main;
 </script>
 
