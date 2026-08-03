@@ -3,180 +3,145 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AR Object Tracking Shopping</title>
+  <title>AR Tracking Shopping</title>
   
-  <!-- TensorFlow.js と COCO-SSD (リアルタイム物体検出ライブラリ) の読み込み -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+  <!-- AIライブラリ（TensorFlow.js + COCO-SSD） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 
   <style>
-    body {
+    * { box-sizing: border-box; }
+    body, html {
       margin: 0; padding: 0;
+      width: 100%; height: 100%;
       background: #000; color: white;
-      font-family: 'Helvetica Neue', Arial, sans-serif;
+      font-family: sans-serif;
       overflow: hidden;
     }
 
-    /* カメラ映像 */
     .container {
       position: relative;
       width: 100vw; height: 100vh;
     }
 
+    /* カメラ映像を全画面表示 */
     video {
-      width: 100%; height: 100%;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
       object-fit: cover;
+      z-index: 1;
     }
 
-    /* リアルタイム追従用キャンバス */
+    /* トラッキング枠を描く透明キャンバス */
     canvas {
       position: absolute;
       top: 0; left: 0;
-      width: 100%; height: 100%;
+      width: 100vw; height: 100vh;
+      z-index: 2;
       pointer-events: none;
-      z-index: 5;
     }
 
-    /* ステータス表示バー */
+    /* 上部ステータス */
     .status-bar {
       position: absolute;
       top: 15px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
+      background: rgba(0, 0, 0, 0.8);
       padding: 8px 16px;
       border-radius: 20px;
       font-size: 12px;
       color: #00ffcc;
-      z-index: 20;
-      backdrop-filter: blur(5px);
-      border: 1px solid rgba(0, 255, 204, 0.3);
+      z-index: 10;
+      border: 1px solid #00ffcc;
     }
 
-    /* ARオーバーレイ（最初のモックアップ画像風レイアウト） */
+    /* ARオーバーレイ（最初のモックアップ画像再現） */
     .ar-overlay {
       position: absolute;
       top: 0; left: 0;
-      width: 100%; height: 100%;
+      width: 100vw; height: 100vh;
+      z-index: 3;
       pointer-events: none;
-      z-index: 10;
-      display: none; /* トラッキング時に表示 */
+      display: none;
     }
 
-    /* 左側：口コミパネル */
+    /* 左：口コミ */
     .review-panel {
       position: absolute;
-      top: 80px; left: 10px;
-      width: 42%;
-      max-height: 60vh;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      top: 70px; left: 10px;
+      width: 44%;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
       border-radius: 10px;
-      padding: 10px;
-      box-sizing: border-box;
+      padding: 8px;
       font-size: 11px;
-      overflow-y: auto;
-      pointer-events: auto;
     }
-    .review-panel h3 { margin: 0 0 6px 0; font-size: 13px; color: #fff; border-bottom: 1px solid #444; padding-bottom: 4px; }
-    .pos-title { color: #4caf50; font-weight: bold; margin-top: 4px; }
-    .neg-title { color: #ff5252; font-weight: bold; margin-top: 8px; }
-    .review-text { color: #ddd; margin: 2px 0 6px 0; line-height: 1.3; }
+    .review-panel h3 { margin: 0 0 4px 0; font-size: 12px; color: #fff; border-bottom: 1px solid #555; }
+    .pos { color: #4caf50; font-weight: bold; margin-top: 4px; }
+    .neg { color: #ff5252; font-weight: bold; margin-top: 6px; }
+    p { margin: 2px 0; color: #ddd; font-size: 10px; }
 
-    /* 右側：商品情報・比較パネル */
+    /* 右：情報＆比較 */
     .info-panel {
       position: absolute;
-      top: 80px; right: 10px;
+      top: 70px; right: 10px;
       width: 48%;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255, 255, 255, 0.3);
       border-radius: 10px;
-      padding: 10px;
-      box-sizing: border-box;
-      pointer-events: auto;
+      padding: 8px;
+      font-size: 11px;
     }
-    .prod-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      border-bottom: 1px solid #444;
-      padding-bottom: 6px;
-      margin-bottom: 8px;
-    }
-    .prod-name { font-size: 13px; font-weight: bold; margin: 0; }
-    .stars { color: #ffd700; font-size: 10px; }
+    .title-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #555; padding-bottom: 4px; }
+    .title-row h2 { margin: 0; font-size: 12px; }
+    .stars { color: #ffd700; font-size: 9px; }
 
-    .compare-title { font-size: 11px; color: #ccc; margin: 6px 0 4px 0; }
-    .compare-list {
-      display: flex;
-      flex-direction: column;
-      gap: 5px;
-    }
     .compare-card {
       background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 5px;
-      padding: 4px 6px;
-      font-size: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      border: 1px solid #666;
+      border-radius: 4px;
+      padding: 4px;
+      margin-top: 4px;
+      display: flex; justify-content: space-between;
+      font-size: 9px;
     }
-    .compare-card.active { border-color: #ff00ff; background: rgba(255, 0, 255, 0.15); }
-
-    /* レスポンシブ調整（小さめのスマホ画面用） */
-    @media (max-width: 380px) {
-      .review-panel, .info-panel { font-size: 10px; padding: 6px; }
-      .prod-name { font-size: 11px; }
-    }
+    .compare-card.active { border-color: #ff00ff; background: rgba(255,0,255,0.2); }
   </style>
 </head>
 <body>
 
 <div class="container">
-  <!-- カメラ映像 -->
   <video id="webcam" autoplay playsinline muted></video>
-  
-  <!-- トラッキング枠を描画するキャンバス -->
-  <canvas id="tracker-canvas"></canvas>
+  <canvas id="canvas"></canvas>
 
-  <!-- ステータス表示 -->
-  <div class="status-bar" id="status-text">AIモデル読み込み中...</div>
+  <div class="status-bar" id="status">🤖 AI準備中...（少々お待ちください）</div>
 
-  <!-- 最初に見せていただいたモックアップ風オーバーレイUI -->
-  <div class="ar-overlay" id="ar-overlay">
-    <!-- 左：口コミ -->
+  <div class="ar-overlay" id="overlay">
     <div class="review-panel">
       <h3>▼ 口コミ</h3>
-      <div class="pos-title">★ 肯定的なレビュー</div>
-      <p class="review-text" id="pos-review">一口サイズで食べやすい！サクサクで美味しい。</p>
-      
-      <div class="neg-title">☆ 否定的なレビュー</div>
-      <p class="review-text" id="neg-review">少しパサつきが気になるかも。</p>
+      <div class="pos">★ 肯定的なレビュー</div>
+      <p id="pos-text">手軽で美味しい！満足度が高い。</p>
+      <div class="neg">☆ 否定的なレビュー</div>
+      <p id="neg-text">少し量が少なく感じるかも。</p>
     </div>
 
-    <!-- 右：比較・詳細 -->
     <div class="info-panel">
-      <div class="prod-header">
-        <h2 class="prod-name" id="prod-name">チョコあ～んぱん</h2>
+      <div class="title-row">
+        <h2 id="prod-name">チョコあ～んぱん</h2>
         <div class="stars">★★★★★</div>
       </div>
-
-      <div class="compare-title">▼ 比較を選択</div>
-      <div class="compare-list" id="compare-list">
-        <div class="compare-card active">
-          <span>チョコあ～んぱん</span>
-          <b>¥108</b>
-        </div>
-        <div class="compare-card">
-          <span>たけのこの里</span>
-          <b>¥200</b>
-        </div>
-        <div class="compare-card">
-          <span>コアラのマーチ</span>
-          <b>¥120</b>
-        </div>
+      <div style="font-size:10px; color:#ccc; margin-top:4px;">▼ 比較を選択</div>
+      <div class="compare-card active">
+        <span id="comp-1">チョコあ～んぱん</span><b>¥108</b>
+      </div>
+      <div class="compare-card">
+        <span>たけのこの里</span><b>¥200</b>
+      </div>
+      <div class="compare-card">
+        <span>コアラのマーチ</span><b>¥120</b>
       </div>
     </div>
   </div>
@@ -184,124 +149,119 @@
 
 <script>
   const video = document.getElementById('webcam');
-  const canvas = document.getElementById('tracker-canvas');
+  const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
-  const statusText = document.getElementById('status-text');
-  const arOverlay = document.getElementById('ar-overlay');
+  const statusEl = document.getElementById('status');
+  const overlayEl = document.getElementById('overlay');
 
   let model = null;
 
-  // 1. カメラのセットアップ
-  async function setupCamera() {
+  // 1. カメラ起動
+  async function startCamera() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: "environment" },
         audio: false
       });
       video.srcObject = stream;
-      return new Promise((resolve) => {
-        video.onloadedmetadata = () => { resolve(video); };
-      });
-    } catch (err) {
-      statusText.innerText = "カメラの起動に失敗しました";
-      console.error(err);
+      await new Promise((resolve) => { video.onloadeddata = () => resolve(); });
+    } catch (e) {
+      statusEl.innerText = "❌ カメラの起動に失敗しました";
     }
   }
 
-  // 2. 物体認識・トラッキングループ
-  async function detectObjects() {
-    // 画面サイズにキャンバスを合わせる
-    canvas.width = video.clientWidth;
-    canvas.height = video.clientHeight;
+  // 2. リアルタイム追従（ループ）
+  async function predictLoop() {
+    // キャンバスサイズを画面に合わせる
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-    // AIでカメラ映像内の物体を検出
-    const predictions = await model.detect(video);
+    if (model && video.readyState === 4) {
+      // AI物体検出の実行
+      const predictions = await model.detect(video);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // キャンバスをクリア
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (predictions.length > 0) {
+        statusEl.innerText = "🎯 ターゲットを追従中！";
+        overlayEl.style.display = "block";
 
-    if (predictions.length > 0) {
-      statusText.innerText = "🎯 ターゲット検出・追従中";
-      arOverlay.style.display = "block"; // オーバーレイUIを表示
+        // 一番確信度の高い物体を追従対象にする
+        const obj = predictions[0];
+        
+        // 映像座標を画面座標に変換
+        const scaleX = canvas.width / video.videoWidth;
+        const scaleY = canvas.height / video.videoHeight;
+        const x = obj.bbox[0] * scaleX;
+        const y = obj.bbox[1] * scaleY;
+        const w = obj.bbox[2] * scaleX;
+        const h = obj.bbox[3] * scaleY;
 
-      // 最も確信度が高い物体をメインターゲットにする
-      const primary = predictions[0];
-      
-      // 映像の比率に合わせてバウンディングボックスの座標を変換
-      const scaleX = canvas.width / video.videoWidth;
-      const scaleY = canvas.height / video.videoHeight;
+        // --- 動くトラッキング枠（蛍光ピンク＆シアン）の描画 ---
+        ctx.strokeStyle = '#ff00ff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
 
-      const x = primary.bbox[0] * scaleX;
-      const y = primary.bbox[1] * scaleY;
-      const width = primary.bbox[2] * scaleX;
-      const height = primary.bbox[3] * scaleY;
+        // トラッキング感（AR角枠）の描画
+        const len = 15;
+        ctx.strokeStyle = '#00ffcc';
+        ctx.lineWidth = 4;
+        // 左上
+        ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+        // 右上
+        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
+        // 左下
+        ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
+        // 右下
+        ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
 
-      // --- 四角いトラッキング枠（ピンクの蛍光枠）の描画 ---
-      ctx.strokeStyle = '#ff00ff';
-      ctx.lineWidth = 4;
-      ctx.shadowColor = '#ff00ff';
-      ctx.shadowBlur = 10;
-      ctx.strokeRect(x, y, width, height);
+        // 検出したモノのラベルタグを表示
+        ctx.fillStyle = '#ff00ff';
+        ctx.fillRect(x, y - 22, w > 120 ? 120 : w, 22);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(obj.class, x + 5, y - 6);
 
-      // 角のアクセントを描画（AR風演出）
-      const cornerLength = 15;
-      ctx.strokeStyle = '#00ffcc';
-      ctx.lineWidth = 5;
-      // 左上角
-      ctx.beginPath(); ctx.moveTo(x, y + cornerLength); ctx.lineTo(x, y); ctx.lineTo(x + cornerLength, y); ctx.stroke();
-      // 右上角
-      ctx.beginPath(); ctx.moveTo(x + width - cornerLength, y); ctx.lineTo(x + width, y); ctx.lineTo(x + width, y + cornerLength); ctx.stroke();
-      // 左下角
-      ctx.beginPath(); ctx.moveTo(x, y + height - cornerLength); ctx.lineTo(x, y + height); ctx.lineTo(x + cornerLength, y + height); ctx.stroke();
-      // 右下角
-      ctx.beginPath(); ctx.moveTo(x + width - cornerLength, y + height); ctx.lineTo(x + width, y + height); ctx.lineTo(x + width, y + height - cornerLength); ctx.stroke();
+        // 検出したモノに応じて表示テキストを変更
+        updateText(obj.class);
 
-      // 検出したモノに合わせてテキストを更新（※例: bottle, cup, book等）
-      updateUIData(primary.class);
+      } else {
+        statusEl.innerText = "🔍 モノ（ボトル、スマホ、本、カップ等）を映してください";
+        overlayEl.style.display = "none";
+      }
+    }
+    requestAnimationFrame(predictLoop);
+  }
 
+  // 表示情報の更新
+  function updateText(label) {
+    const name = document.getElementById('prod-name');
+    const comp = document.getElementById('comp-1');
+    const pos = document.getElementById('pos-text');
+
+    if (label === 'bottle' || label === 'cup') {
+      name.innerText = "コカ・コーラ";
+      comp.innerText = "コカ・コーラ";
+      pos.innerText = "キンキンに冷やすと最高！炭酸が強い。";
     } else {
-      statusText.innerText = "🔍 カメラにモノ（お菓子、ボトル等）を映してください";
-      // 検出されないときは枠とUIを非表示
-      arOverlay.style.display = "none";
-    }
-
-    // 次のフレームで再検出（ループ）
-    requestAnimationFrame(detectObjects);
-  }
-
-  // 3. 検出されたモノのラベルに応じて表示UIを書き換える
-  function updateUIData(detectedClass) {
-    const nameEl = document.getElementById('prod-name');
-    const posEl = document.getElementById('pos-review');
-    const negEl = document.getElementById('neg-review');
-
-    // 検出されたオブジェクト名に応じてデータを疑似切り替え
-    if (detectedClass === 'bottle' || detectedClass === 'cup') {
-      nameEl.innerText = "コカ・コーラ 500ml";
-      posEl.innerText = "炭酸が強くてリフレッシュに最高！";
-      negEl.innerText = "糖分が多いので飲みすぎ注意。";
-    } else if (detectedClass === 'cell phone' || detectedClass === 'book') {
-      nameEl.innerText = "チョコあ～んぱん";
-      posEl.innerText = "一口サイズで食べやすい！サクサクで美味しい。";
-      negEl.innerText = "少しパサつきが気になるかも。";
-    } else {
-      nameEl.innerText = detectedClass.toUpperCase() + " (検出物)";
-      posEl.innerText = "高評価：使い勝手が良く満足度が高い製品です。";
-      negEl.innerText = "低評価：やや価格が高いと感じる人がいるようです。";
+      name.innerText = "チョコあ～んぱん";
+      comp.innerText = "チョコあ～んぱん";
+      pos.innerText = "一口サイズで食べやすい！サクサクで美味しい。";
     }
   }
 
-  // 4. アプリ起動処理
-  async function init() {
-    await setupCamera();
-    statusText.innerText = "AIモデル（COCO-SSD）を起動中...";
-    // TensorFlow物体検出モデルのロード
-    model = await cocoSsd.load();
-    statusText.innerText = "🔍 カメラにモノを映してください";
-    detectObjects();
+  // アプリ起動
+  async function main() {
+    await startCamera();
+    try {
+      model = await cocoSsd.load();
+      statusEl.innerText = "🔍 モノ（ボトル、スマホ、本等）を映してください";
+    } catch (e) {
+      statusEl.innerText = "❌ AIモデルの読み込みに失敗しました";
+    }
+    predictLoop();
   }
 
-  window.onload = init;
+  window.onload = main;
 </script>
 
 </body>
