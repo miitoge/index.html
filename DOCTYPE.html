@@ -76,72 +76,72 @@
 
   // 2. リアルタイム・トラッキング描画処理
   async function predictLoop() {
-    // キャンバス解像度を画面表示サイズと完全一致させる
     if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
     }
 
     if (model && video.readyState === 4) {
-      // AIで物体位置を判定
-      const predictions = await model.detect(video);
+      // 検出感度を少し上げて（0.35以上）細かく探す
+      const predictions = await model.detect(video, 10, 0.35);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      if (predictions.length > 0) {
-        // 最も確信度の高い物体を追従対象に選定
-        const obj = predictions[0];
-        
-        // --- 画面全画面（object-fit: cover）に対する正確な位置追従計算 ---
-        const vw = video.videoWidth;
-        const vh = video.videoHeight;
-        const cw = canvas.width;
-        const ch = canvas.height;
+      const vw = video.videoWidth;
+      const vh = video.videoHeight;
+      const cw = canvas.width;
+      const ch = canvas.height;
 
-        const videoRatio = vw / vh;
-        const canvasRatio = cw / ch;
+      const videoRatio = vw / vh;
+      const canvasRatio = cw / ch;
 
-        let renderWidth, renderHeight, offsetX, offsetY;
+      let renderWidth, renderHeight, offsetX, offsetY;
 
-        if (canvasRatio > videoRatio) {
-          renderWidth = cw;
-          renderHeight = cw / videoRatio;
-          offsetX = 0;
-          offsetY = (ch - renderHeight) / 2;
-        } else {
-          renderWidth = ch * videoRatio;
-          renderHeight = ch;
-          offsetX = (cw - renderWidth) / 2;
-          offsetY = 0;
-        }
+      if (canvasRatio > videoRatio) {
+        renderWidth = cw;
+        renderHeight = cw / videoRatio;
+        offsetX = 0;
+        offsetY = (ch - renderHeight) / 2;
+      } else {
+        renderWidth = ch * videoRatio;
+        renderHeight = ch;
+        offsetX = (cw - renderWidth) / 2;
+        offsetY = 0;
+      }
 
-        const scaleX = renderWidth / vw;
-        const scaleY = renderHeight / vh;
+      const scaleX = renderWidth / vw;
+      const scaleY = renderHeight / vh;
 
-        // 動く物体のリアルタイム座標（X, Y, 幅, 高さ）
+      // 画面全体に対するサイズの割合を計算して「巨大すぎる枠（棚全体）」を除外するフィルタリング
+      const validObjects = predictions.filter(obj => {
+        const areaRatio = (obj.bbox[2] * obj.bbox[3]) / (vw * vh);
+        // 画面の50%以上を占める枠（棚や人間など）は除外
+        return areaRatio < 0.50;
+      });
+
+      // 検出された商品（最大3つまで）に枠を描画
+      const targets = validObjects.slice(0, 3);
+
+      targets.forEach(obj => {
         const x = obj.bbox[0] * scaleX + offsetX;
         const y = obj.bbox[1] * scaleY + offsetY;
         const w = obj.bbox[2] * scaleX;
         const h = obj.bbox[3] * scaleY;
 
-        // --- 動くトラッキング枠（メイン：ピンク） ---
+        // --- トラッキング枠（メイン：ピンク） ---
         ctx.strokeStyle = '#ff00ff';
         ctx.lineWidth = 3;
         ctx.strokeRect(x, y, w, h);
 
-        // --- 動くAR角枠アクセント（シアン） ---
-        const len = Math.min(w, h) * 0.2; // 枠サイズに合わせて角枠の長さも可変
+        // --- AR角枠アクセント（シアン） ---
+        const len = Math.min(w, h) * 0.25;
         ctx.strokeStyle = '#00ffcc';
         ctx.lineWidth = 4;
 
-        // 左上
         ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
-        // 右上
-        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
-        // 左下
+        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w); ctx.lineTo(x + w, y + len); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
-        // 右下
-        ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
-      }
+        ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w); ctx.lineTo(x + w, y + h - len); ctx.stroke();
+      });
     }
     requestAnimationFrame(predictLoop);
   }
