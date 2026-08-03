@@ -1,206 +1,266 @@
-<DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AR Smart Shopping Prototype</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>AR Smart Shopping</title>
   <style>
     body {
-      margin: 0;
-      padding: 0;
-      background: #121212;
-      color: white;
-      font-family: sans-serif;
+      margin: 0; padding: 0;
+      background: #000; color: white;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
       overflow: hidden;
     }
 
-    /* カメラビューファインダー */
-    .container {
-      position: relative;
-      width: 100vw;
-      height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
+    /* カメラ映像を全画面に */
+    .camera-container {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100vw; height: 100vh;
+      z-index: 1;
     }
-
-    video, img {
-      width: 100%;
-      height: 100%;
+    video {
+      width: 100%; height: 100%;
       object-fit: cover;
     }
 
-    /* 検出枠（ピンク） */
-    .target-box {
+    /* スキャン枠 */
+    .scan-frame {
       position: absolute;
-      top: 15%;
-      left: 38%;
-      width: 24%;
-      height: 30%;
-      border: 4px solid #ff00ff;
-      border-radius: 8px;
-      box-shadow: 0 0 15px rgba(255, 0, 255, 0.5);
+      top: 25%; left: 50%;
+      transform: translateX(-50%);
+      width: 60vw; height: 30vh;
+      border: 3px dashed rgba(255, 255, 255, 0.7);
+      border-radius: 12px;
+      z-index: 2;
       pointer-events: none;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3); /* 周りを少し暗くする */
+    }
+    .scan-frame.active {
+      border-color: #00ffcc;
+      box-shadow: 0 0 15px #00ffcc, 0 0 0 9999px rgba(0, 0, 0, 0.5);
     }
 
-    /* 左側：口コミパネル */
-    .review-panel {
+    /* 情報パネル（スマホ用に下部に固定・スクロール可能に） */
+    .info-overlay {
       position: absolute;
-      top: 10%;
-      left: 5%;
-      width: 30%;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(5px);
-      padding: 15px;
-      border-radius: 12px;
-      font-size: 14px;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      bottom: 0; left: 0;
+      width: 100%; height: 50vh; /* 画面の下半分 */
+      background: rgba(20, 20, 20, 0.85);
+      backdrop-filter: blur(10px);
+      border-top-left-radius: 20px;
+      border-top-right-radius: 20px;
+      z-index: 10;
+      padding: 20px;
+      box-sizing: border-box;
+      transform: translateY(100%);
+      transition: transform 0.3s ease-in-out;
+      overflow-y: auto; /* 縦スクロール可能に */
+    }
+    .info-overlay.show {
+      transform: translateY(0);
     }
 
-    .review-panel h3 { margin: 0 0 10px 0; font-size: 16px; color: #fff; }
-    .positive { color: #4caf50; font-weight: bold; }
-    .negative { color: #f44336; font-weight: bold; margin-top: 10px; }
-
-    /* 右側：商品情報 & 比較パネル */
-    .info-panel {
-      position: absolute;
-      top: 10%;
-      right: 5%;
-      width: 35%;
-      background: rgba(0, 0, 0, 0.75);
-      backdrop-filter: blur(5px);
-      padding: 15px;
-      border-radius: 12px;
-    }
-
-    .title-area {
+    /* 商品ヘッダー */
+    .product-header {
       display: flex;
-      align-items: center;
       justify-content: space-between;
+      align-items: center;
       border-bottom: 1px solid #444;
-      padding-bottom: 8px;
-      margin-bottom: 12px;
+      padding-bottom: 10px;
+      margin-bottom: 15px;
     }
+    .product-title { margin: 0; font-size: 20px; font-weight: bold; }
+    .product-price { font-size: 18px; color: #00ffcc; font-weight: bold; }
 
-    .title-area h2 { margin: 0; font-size: 18px; }
-    .stars { color: #ffd700; }
+    /* セクション共通 */
+    .section-title { font-size: 14px; color: #aaa; margin: 0 0 8px 0; }
+    
+    /* 口コミエリア */
+    .review-box {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 15px;
+      font-size: 13px;
+    }
+    .good-review { color: #4caf50; font-weight: bold; margin-bottom: 5px; }
+    .bad-review { color: #ff5252; font-weight: bold; margin-top: 10px; margin-bottom: 5px; }
+    .review-text { margin: 0; color: #ddd; line-height: 1.4; }
 
-    .compare-section h4 { margin: 5px 0; font-size: 14px; color: #ccc; }
+    /* 比較エリア */
     .compare-grid {
       display: flex;
-      gap: 8px;
+      gap: 10px;
+      overflow-x: auto; /* 横スクロール可能に */
+      padding-bottom: 10px;
     }
-
-    .compare-card {
-      flex: 1;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid #666;
-      border-radius: 6px;
-      padding: 6px;
+    .compare-item {
+      flex: 0 0 100px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      padding: 8px;
       text-align: center;
-      font-size: 11px;
     }
+    .compare-item.active { border: 1px solid #00ffcc; background: rgba(0, 255, 204, 0.1); }
+    .compare-name { font-size: 12px; margin: 5px 0; }
+    .compare-price { font-size: 12px; font-weight: bold; color: #fff; margin: 0; }
 
-    .compare-card.active {
-      border-color: #ff00ff;
-    }
-
-    .compare-card img {
-      width: 100%;
-      height: 40px;
-      object-fit: contain;
-      background: #fff;
-      border-radius: 4px;
-    }
-
-    /* 操作ボタン */
-    .controls {
+    /* スキャンボタン */
+    .scan-btn-container {
       position: absolute;
-      bottom: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      gap: 15px;
+      bottom: 30px;
+      left: 0;
+      width: 100%;
+      text-align: center;
+      z-index: 20;
     }
-
-    button {
-      padding: 12px 24px;
-      background: #ff00ff;
+    .scan-btn {
+      background: #00ffcc;
+      color: #000;
       border: none;
-      color: white;
+      padding: 15px 40px;
+      border-radius: 30px;
+      font-size: 16px;
       font-weight: bold;
-      border-radius: 25px;
+      box-shadow: 0 4px 15px rgba(0, 255, 204, 0.4);
       cursor: pointer;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .scan-btn:active { transform: scale(0.95); }
+
+    /* 閉じるボタン */
+    .close-btn {
+      position: absolute;
+      top: 15px; right: 20px;
+      background: none; border: none;
+      color: #888; font-size: 24px;
+      cursor: pointer;
     }
   </style>
 </head>
 <body>
 
-<div class="container">
-  <!-- カメラ映像 -->
-  <video id="webcam" autoplay playsinline></video>
+  <!-- カメラコンテナ -->
+  <div class="camera-container">
+    <video id="webcam" autoplay playsinline></video>
+    <div id="scan-frame" class="scan-frame"></div>
+  </div>
 
-  <!-- ARオーバーレイ要素（スキャン時に表示） -->
-  <div id="ar-overlay" style="display: none;">
-    <!-- 認識フレーム -->
-    <div class="target-box"></div>
+  <!-- スキャンボタン -->
+  <div class="scan-btn-container" id="btn-container">
+    <button class="scan-btn" onclick="startScan()">商品をスキャン</button>
+  </div>
 
-    <!-- 左：口コミ -->
-    <div class="review-panel">
-      <h3>▼口コミ</h3>
-      <div class="positive">★肯定的なレビュー</div>
-      <p>「一口サイズで食べやすい！サクサクで美味しい。」<br>「チョコとパンの相性が抜群。」</p>
+  <!-- 結果表示パネル（画面下部からスライドアップ） -->
+  <div id="info-panel" class="info-overlay">
+    <button class="close-btn" onclick="closePanel()">×</button>
+    
+    <div class="product-header">
+      <h2 class="product-title" id="p-title">商品名</h2>
+      <span class="product-price" id="p-price">¥0</span>
+    </div>
+
+    <!-- 口コミ -->
+    <h3 class="section-title">購入者の声</h3>
+    <div class="review-box">
+      <div class="good-review">👍 良い口コミ</div>
+      <p class="review-text" id="p-good">ここに良い評価が入ります。</p>
       
-      <div class="negative">☆否定的なレビュー</div>
-      <p>「少しパサつきが気になるかも。」<br>「内容量がもう少し欲しい。」</p>
+      <div class="bad-review">👎 イマイチな口コミ</div>
+      <p class="review-text" id="p-bad">ここに悪い評価が入ります。</p>
     </div>
 
-    <!-- 右：商品詳細・比較 -->
-    <div class="info-panel">
-      <div class="title-area">
-        <h2>チョコあ～んぱん</h2>
-        <div class="stars">★★★★★</div>
-      </div>
-
-      <div class="compare-section">
-        <h4>▼比較を選択</h4>
-        <div class="compare-grid">
-          <div class="compare-card active">
-            <div style="height:40px; background:#eee; color:#333; line-height:40px;">画像</div>
-            <p>チョコあ～んぱん<br><b>¥108</b></p>
-          </div>
-          <div class="compare-card">
-            <div style="height:40px; background:#eee; color:#333; line-height:40px;">画像</div>
-            <p>たけのこの里<br><b>¥200</b></p>
-          </div>
-          <div class="compare-card">
-            <div style="height:40px; background:#eee; color:#333; line-height:40px;">画像</div>
-            <p>コアラのマーチ<br><b>¥120</b></p>
-          </div>
-        </div>
-      </div>
+    <!-- 比較 -->
+    <h3 class="section-title">類似商品との比較</h3>
+    <div class="compare-grid" id="compare-container">
+      <!-- JSで中身を生成 -->
     </div>
   </div>
-
-  <!-- 操作ボタン -->
-  <div class="controls">
-    <button onclick="toggleScan()">商品をスキャン (ON/OFF)</button>
-  </div>
-</div>
 
 <script>
-  // カメラの起動
+  // --- 1. カメラの起動 ---
   const video = document.getElementById('webcam');
   navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
     .then(stream => { video.srcObject = stream; })
-    .catch(err => { console.error("カメラの起動に失敗しました:", err); });
+    .catch(err => { console.error("カメラエラー:", err); alert("カメラの許可が必要です"); });
 
-  // デモ用の表示切り替え
-  let isScanned = false;
-  function toggleScan() {
-    isScanned = !isScanned;
-    document.getElementById('ar-overlay').style.display = isScanned ? 'block' : 'none';
+  // --- 2. 商品データベース（疑似AIスキャン用） ---
+  const productDatabase = [
+    {
+      title: "チョコあ〜んぱん", price: "¥108",
+      good: "「一口サイズで食べやすい！サクサクで美味しい。」<br>「小腹が空いた時にぴったり。」",
+      bad: "「少しパサつきが気になるかも。」<br>「内容量がもう少し欲しい。」",
+      compares: [
+        { name: "チョコあ〜んぱん", price: "¥108", active: true },
+        { name: "たけのこの里", price: "¥200", active: false },
+        { name: "コアラのマーチ", price: "¥120", active: false }
+      ]
+    },
+    {
+      title: "じゃがりこ サラダ", price: "¥160",
+      good: "「安定の美味しさ！カリカリ食感がたまらない。」<br>「手が汚れにくくて食べやすい。」",
+      bad: "「硬すぎて歯茎に刺さることがある。」<br>「底のほうが少し取り出しにくい。」",
+      compares: [
+        { name: "じゃがりこ サラダ", price: "¥160", active: true },
+        { name: "じゃがビー", price: "¥140", active: false },
+        { name: "ポテトチップス", price: "¥150", active: false }
+      ]
+    },
+    {
+      title: "コカ・コーラ 500ml", price: "¥160",
+      good: "「炭酸が強くてリフレッシュに最高！」<br>「ピザやジャンクフードに一番合う。」",
+      bad: "「糖分が多いので飲みすぎ注意。」<br>「ぬるくなると美味しくない。」",
+      compares: [
+        { name: "コカ・コーラ", price: "¥160", active: true },
+        { name: "ペプシコーラ", price: "¥150", active: false },
+        { name: "ドクターペッパー", price: "¥140", active: false }
+      ]
+    }
+  ];
+
+  // --- 3. スキャン実行処理 ---
+  function startScan() {
+    const frame = document.getElementById('scan-frame');
+    const panel = document.getElementById('info-panel');
+    const btnBox = document.getElementById('btn-container');
+
+    // スキャン中の演出（枠を光らせる）
+    frame.classList.add('active');
+    
+    // AIが解析している風のローディング時間（1秒）
+    setTimeout(() => {
+      frame.classList.remove('active');
+      btnBox.style.display = 'none'; // ボタンを隠す
+      
+      // ランダムに商品データを1つ選ぶ（疑似スキャン）
+      const randomProduct = productDatabase[Math.floor(Math.random() * productDatabase.length)];
+      
+      // 画面にデータを流し込む
+      document.getElementById('p-title').innerText = randomProduct.title;
+      document.getElementById('p-price').innerText = randomProduct.price;
+      document.getElementById('p-good').innerHTML = randomProduct.good;
+      document.getElementById('p-bad').innerHTML = randomProduct.bad;
+
+      // 比較データの生成
+      const compareHtml = randomProduct.compares.map(item => `
+        <div class="compare-item ${item.active ? 'active' : ''}">
+          <div class="compare-name">${item.name}</div>
+          <div class="compare-price">${item.price}</div>
+        </div>
+      `).join('');
+      document.getElementById('compare-container').innerHTML = compareHtml;
+
+      // パネルを下からスライド表示
+      panel.classList.add('show');
+    }, 1000);
+  }
+
+  // --- 4. パネルを閉じる処理 ---
+  function closePanel() {
+    document.getElementById('info-panel').classList.remove('show');
+    setTimeout(() => {
+      document.getElementById('btn-container').style.display = 'block'; // ボタン復活
+    }, 300);
   }
 </script>
 
