@@ -3,14 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>Barcode AR Shopping</title>
+  <title>AR Tracking</title>
   <style>
     * { box-sizing: border-box; }
     body, html {
       margin: 0; padding: 0;
       width: 100%; height: 100%;
-      background: #000; color: white;
-      font-family: sans-serif;
+      background: #000;
       overflow: hidden;
     }
 
@@ -19,7 +18,7 @@
       width: 100vw; height: 100vh;
     }
 
-    /* カメラ映像 */
+    /* 全画面カメラ映像 */
     video {
       position: absolute;
       top: 0; left: 0;
@@ -28,7 +27,7 @@
       z-index: 1;
     }
 
-    /* AR枠を描くキャンバス */
+    /* トラッキング枠を描く透明キャンバス */
     canvas {
       position: absolute;
       top: 0; left: 0;
@@ -37,74 +36,21 @@
       pointer-events: none;
     }
 
-    /* ステータスバー */
+    /* 最小限のステータス表示 */
     .status-bar {
       position: absolute;
       top: 15px; left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.85);
-      padding: 8px 16px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 6px 14px;
       border-radius: 20px;
-      font-size: 12px;
+      font-size: 11px;
       color: #00ffcc;
       z-index: 10;
-      border: 1px solid #00ffcc;
+      border: 1px solid rgba(0, 255, 204, 0.5);
       white-space: nowrap;
-    }
-
-    /* ARオーバーレイ（UI表示） */
-    .ar-overlay {
-      position: absolute;
-      top: 0; left: 0;
-      width: 100vw; height: 100vh;
-      z-index: 3;
       pointer-events: none;
-      display: none;
     }
-
-    /* 左：口コミ */
-    .review-panel {
-      position: absolute;
-      top: 65px; left: 10px;
-      width: 44%;
-      background: rgba(0, 0, 0, 0.85);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 10px;
-      padding: 8px;
-      font-size: 11px;
-    }
-    .review-panel h3 { margin: 0 0 4px 0; font-size: 12px; color: #fff; border-bottom: 1px solid #555; }
-    .pos { color: #4caf50; font-weight: bold; margin-top: 4px; }
-    .neg { color: #ff5252; font-weight: bold; margin-top: 6px; }
-    p { margin: 2px 0; color: #ddd; font-size: 10px; line-height: 1.3; }
-
-    /* 右：情報＆比較 */
-    .info-panel {
-      position: absolute;
-      top: 65px; right: 10px;
-      width: 48%;
-      background: rgba(0, 0, 0, 0.85);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 10px;
-      padding: 8px;
-      font-size: 11px;
-    }
-    .title-row { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #555; padding-bottom: 4px; }
-    .title-row h2 { margin: 0; font-size: 12px; }
-    .stars { color: #ffd700; font-size: 9px; }
-
-    .compare-card {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid #666;
-      border-radius: 4px;
-      padding: 4px;
-      margin-top: 4px;
-      display: flex; justify-content: space-between;
-      font-size: 9px;
-    }
-    .compare-card.active { border-color: #ff00ff; background: rgba(255,0,255,0.2); }
   </style>
 </head>
 <body>
@@ -112,35 +58,7 @@
 <div class="container">
   <video id="webcam" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
-
-  <div class="status-bar" id="status">📷 商品のバーコードにかざしてください</div>
-
-  <div class="ar-overlay" id="overlay">
-    <div class="review-panel">
-      <h3>▼ 口コミ</h3>
-      <div class="pos">★ 肯定的なレビュー</div>
-      <p id="pos-text">サクサクで美味しく、一口サイズで食べやすい！</p>
-      <div class="neg">☆ 否定的なレビュー</div>
-      <p id="neg-text">内容量がもう少し欲しいとの声も。</p>
-    </div>
-
-    <div class="info-panel">
-      <div class="title-row">
-        <h2 id="prod-name">商品名</h2>
-        <div class="stars">★★★★★</div>
-      </div>
-      <div style="font-size:10px; color:#ccc; margin-top:4px;">▼ 比較・価格情報</div>
-      <div class="compare-card active">
-        <span id="comp-1">検出した商品</span><b id="prod-price">¥---</b>
-      </div>
-      <div class="compare-card">
-        <span>類似商品A</span><b>¥150</b>
-      </div>
-      <div class="compare-card">
-        <span>類似商品B</span><b>¥120</b>
-      </div>
-    </div>
-  </div>
+  <div class="status-bar" id="status">📷 バーコードにかざしてください</div>
 </div>
 
 <script>
@@ -148,7 +66,6 @@
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   const statusEl = document.getElementById('status');
-  const overlayEl = document.getElementById('overlay');
 
   let barcodeDetector = null;
 
@@ -162,11 +79,11 @@
       video.srcObject = stream;
       await new Promise((resolve) => { video.onloadeddata = () => resolve(); });
     } catch (e) {
-      statusEl.innerText = "❌ カメラの起動に失敗しました";
+      statusEl.innerText = "❌ カメラ起動失敗";
     }
   }
 
-  // 2. バーコード認識＆リアルタイムトラッキング
+  // 2. リアルタイム追従（四角いトラッキング枠の描画のみ）
   async function scanLoop() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
@@ -178,10 +95,9 @@
 
         if (barcodes.length > 0) {
           const code = barcodes[0];
-          statusEl.innerText = `🎯 識別成功！ (JAN: ${code.rawValue})`;
-          overlayEl.style.display = "block";
+          statusEl.innerText = "🎯 ターゲット追従中";
 
-          // バーコードの座標・サイズ計算
+          // 座標・サイズ計算
           const scaleX = canvas.width / video.videoWidth;
           const scaleY = canvas.height / video.videoHeight;
           const x = code.boundingBox.x * scaleX;
@@ -189,26 +105,26 @@
           const w = code.boundingBox.width * scaleX;
           const h = code.boundingBox.height * scaleY;
 
-          // --- 動くトラッキング枠（バーコード位置をぴったり囲む） ---
+          // --- 動くメイン枠（蛍光シアン） ---
           ctx.strokeStyle = '#00ffcc';
           ctx.lineWidth = 3;
           ctx.strokeRect(x, y, w, h);
 
-          // AR装飾角枠
+          // --- AR角枠アクセント（蛍光ピンク） ---
           const len = 12;
           ctx.strokeStyle = '#ff00ff';
           ctx.lineWidth = 4;
+          // 左上
           ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+          // 右上
           ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
+          // 左下
           ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
+          // 右下
           ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
 
-          // 検出したバーコード（JANコード）に合わせて商品情報を表示
-          updateProductData(code.rawValue);
-
         } else {
-          statusEl.innerText = "🔍 身近な商品のバーコードにかざしてください";
-          overlayEl.style.display = "none";
+          statusEl.innerText = "🔍 バーコードにかざしてください";
         }
       } catch (e) {
         console.error(e);
@@ -217,47 +133,13 @@
     requestAnimationFrame(scanLoop);
   }
 
-  // 3. JANコード番号に基づく商品の詳細データ切り替え
-  function updateProductData(janCode) {
-    const name = document.getElementById('prod-name');
-    const comp = document.getElementById('comp-1');
-    const price = document.getElementById('prod-price');
-    const pos = document.getElementById('pos-text');
-    const neg = document.getElementById('neg-text');
-
-    // JANコード判定（※どんなバーコードでも反応するように汎用処理も用意）
-    if (janCode.includes("4901330") || janCode.includes("4901335")) { // お菓子系コード例
-      name.innerText = "じゃがりこ サラダ";
-      comp.innerText = "じゃがりこ サラダ";
-      price.innerText = "¥160";
-      pos.innerText = "カリカリ食感が最高！手が汚れにくくて食べやすい。";
-      neg.innerText = "少し硬めで歯に挟まることがある。";
-    } else if (janCode.includes("4902102")) { // コカ・コーラ系
-      name.innerText = "コカ・コーラ 500ml";
-      comp.innerText = "コカ・コーラ";
-      price.innerText = "¥160";
-      pos.innerText = "炭酸の刺激が最高！リフレッシュにぴったり。";
-      neg.innerText = "糖分が多めなので飲み過ぎに注意。";
-    } else {
-      // その他のバーコードが読み取れた場合
-      name.innerText = "スキャン商品 (JAN: " + janCode.slice(-4) + ")";
-      comp.innerText = "識別済み商品";
-      price.innerText = "¥198";
-      pos.innerText = "高評価：品質が良く、リピート購入者が多い人気商品！";
-      neg.innerText = "低評価：店舗によって少し価格差があるようです。";
-    }
-  }
-
-  // アプリ起動
+  // 起動処理
   async function main() {
     await startCamera();
-
-    // スマホブラウザ標準のバーコード検出器を準備
     if ('BarcodeDetector' in window) {
       barcodeDetector = new BarcodeDetector({ formats: ['javascript', 'ean_13', 'ean_8', 'qr_code'] });
-      statusEl.innerText = "🔍 身近な商品のバーコードにかざしてください";
     } else {
-      statusEl.innerText = "⚠️ お使いのブラウザはBarcodeDetector非対応です";
+      statusEl.innerText = "⚠️ 非対応ブラウザです";
     }
     scanLoop();
   }
