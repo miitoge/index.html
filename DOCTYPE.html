@@ -4,6 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>AR Tracking</title>
+  
+  <!-- AIライブラリ（TensorFlow.js + COCO-SSD） -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
+
   <style>
     * { box-sizing: border-box; }
     body, html {
@@ -18,7 +23,7 @@
       width: 100vw; height: 100vh;
     }
 
-    /* 全画面カメラ映像 */
+    /* カメラ映像を全画面表示 */
     video {
       position: absolute;
       top: 0; left: 0;
@@ -35,22 +40,6 @@
       z-index: 2;
       pointer-events: none;
     }
-
-    /* 最小限のステータス表示 */
-    .status-bar {
-      position: absolute;
-      top: 15px; left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.7);
-      padding: 6px 14px;
-      border-radius: 20px;
-      font-size: 11px;
-      color: #00ffcc;
-      z-index: 10;
-      border: 1px solid rgba(0, 255, 204, 0.5);
-      white-space: nowrap;
-      pointer-events: none;
-    }
   </style>
 </head>
 <body>
@@ -58,18 +47,16 @@
 <div class="container">
   <video id="webcam" autoplay playsinline muted></video>
   <canvas id="canvas"></canvas>
-  <div class="status-bar" id="status">📷 バーコードにかざしてください</div>
 </div>
 
 <script>
   const video = document.getElementById('webcam');
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
-  const statusEl = document.getElementById('status');
 
-  let barcodeDetector = null;
+  let model = null;
 
-  // 1. カメラ起動
+  // 1. カメラ起動（元コードのまま）
   async function startCamera() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -79,69 +66,61 @@
       video.srcObject = stream;
       await new Promise((resolve) => { video.onloadeddata = () => resolve(); });
     } catch (e) {
-      statusEl.innerText = "❌ カメラ起動失敗";
+      console.error("カメラの起動に失敗しました");
     }
   }
 
-  // 2. リアルタイム追従（四角いトラッキング枠の描画のみ）
-  async function scanLoop() {
+  // 2. リアルタイム追従（元コードから枠描画のみを残して削除）
+  async function predictLoop() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    if (barcodeDetector && video.readyState === 4) {
-      try {
-        const barcodes = await barcodeDetector.detect(video);
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (model && video.readyState === 4) {
+      const predictions = await model.detect(video);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        if (barcodes.length > 0) {
-          const code = barcodes[0];
-          statusEl.innerText = "🎯 ターゲット追従中";
+      if (predictions.length > 0) {
+        const obj = predictions[0];
+        
+        // 座標変換
+        const scaleX = canvas.width / video.videoWidth;
+        const scaleY = canvas.height / video.videoHeight;
+        const x = obj.bbox[0] * scaleX;
+        const y = obj.bbox[1] * scaleY;
+        const w = obj.bbox[2] * scaleX;
+        const h = obj.bbox[3] * scaleY;
 
-          // 座標・サイズ計算
-          const scaleX = canvas.width / video.videoWidth;
-          const scaleY = canvas.height / video.videoHeight;
-          const x = code.boundingBox.x * scaleX;
-          const y = code.boundingBox.y * scaleY;
-          const w = code.boundingBox.width * scaleX;
-          const h = code.boundingBox.height * scaleY;
+        // --- 動くトラッキング枠（元コードのピンク＆シアン枠） ---
+        ctx.strokeStyle = '#ff00ff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(x, y, w, h);
 
-          // --- 動くメイン枠（蛍光シアン） ---
-          ctx.strokeStyle = '#00ffcc';
-          ctx.lineWidth = 3;
-          ctx.strokeRect(x, y, w, h);
-
-          // --- AR角枠アクセント（蛍光ピンク） ---
-          const len = 12;
-          ctx.strokeStyle = '#ff00ff';
-          ctx.lineWidth = 4;
-          // 左上
-          ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
-          // 右上
-          ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + len); ctx.stroke();
-          // 左下
-          ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
-          // 右下
-          ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
-
-        } else {
-          statusEl.innerText = "🔍 バーコードにかざしてください";
-        }
-      } catch (e) {
-        console.error(e);
+        // AR角枠
+        const len = 15;
+        ctx.strokeStyle = '#00ffcc';
+        ctx.lineWidth = 4;
+        // 左上
+        ctx.beginPath(); ctx.moveTo(x, y + len); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.stroke();
+        // 右上
+        ctx.beginPath(); ctx.moveTo(x + w - len, y); ctx.lineTo(x + w); ctx.lineTo(x + w, y + len); ctx.stroke();
+        // 左下
+        ctx.beginPath(); ctx.moveTo(x, y + h - len); ctx.lineTo(x, y + h); ctx.lineTo(x + len, y + h); ctx.stroke();
+        // 右下
+        ctx.beginPath(); ctx.moveTo(x + w - len, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - len); ctx.stroke();
       }
     }
-    requestAnimationFrame(scanLoop);
+    requestAnimationFrame(predictLoop);
   }
 
-  // 起動処理
+  // アプリ起動（元コードのまま）
   async function main() {
     await startCamera();
-    if ('BarcodeDetector' in window) {
-      barcodeDetector = new BarcodeDetector({ formats: ['javascript', 'ean_13', 'ean_8', 'qr_code'] });
-    } else {
-      statusEl.innerText = "⚠️ 非対応ブラウザです";
+    try {
+      model = await cocoSsd.load();
+    } catch (e) {
+      console.error("AIモデルの読み込みに失敗しました");
     }
-    scanLoop();
+    predictLoop();
   }
 
   window.onload = main;
