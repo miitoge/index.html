@@ -3,7 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>AR Smart Shopping</title>
+  <title>AR Object Tracking Shopping</title>
+  
+  <!-- TensorFlow.js と COCO-SSD (リアルタイム物体検出ライブラリ) の読み込み -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
   <style>
     body {
       margin: 0; padding: 0;
@@ -12,256 +17,291 @@
       overflow: hidden;
     }
 
-    /* カメラ映像を全画面に */
-    .camera-container {
-      position: absolute;
-      top: 0; left: 0;
+    /* カメラ映像 */
+    .container {
+      position: relative;
       width: 100vw; height: 100vh;
-      z-index: 1;
     }
+
     video {
       width: 100%; height: 100%;
       object-fit: cover;
     }
 
-    /* スキャン枠 */
-    .scan-frame {
+    /* リアルタイム追従用キャンバス */
+    canvas {
       position: absolute;
-      top: 25%; left: 50%;
-      transform: translateX(-50%);
-      width: 60vw; height: 30vh;
-      border: 3px dashed rgba(255, 255, 255, 0.7);
-      border-radius: 12px;
-      z-index: 2;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
       pointer-events: none;
-      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3); /* 周りを少し暗くする */
-    }
-    .scan-frame.active {
-      border-color: #00ffcc;
-      box-shadow: 0 0 15px #00ffcc, 0 0 0 9999px rgba(0, 0, 0, 0.5);
+      z-index: 5;
     }
 
-    /* 情報パネル（スマホ用に下部に固定・スクロール可能に） */
-    .info-overlay {
+    /* ステータス表示バー */
+    .status-bar {
       position: absolute;
-      bottom: 0; left: 0;
-      width: 100%; height: 50vh; /* 画面の下半分 */
-      background: rgba(20, 20, 20, 0.85);
-      backdrop-filter: blur(10px);
-      border-top-left-radius: 20px;
-      border-top-right-radius: 20px;
-      z-index: 10;
-      padding: 20px;
-      box-sizing: border-box;
-      transform: translateY(100%);
-      transition: transform 0.3s ease-in-out;
-      overflow-y: auto; /* 縦スクロール可能に */
-    }
-    .info-overlay.show {
-      transform: translateY(0);
+      top: 15px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #00ffcc;
+      z-index: 20;
+      backdrop-filter: blur(5px);
+      border: 1px solid rgba(0, 255, 204, 0.3);
     }
 
-    /* 商品ヘッダー */
-    .product-header {
+    /* ARオーバーレイ（最初のモックアップ画像風レイアウト） */
+    .ar-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 10;
+      display: none; /* トラッキング時に表示 */
+    }
+
+    /* 左側：口コミパネル */
+    .review-panel {
+      position: absolute;
+      top: 80px; left: 10px;
+      width: 42%;
+      max-height: 60vh;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 10px;
+      box-sizing: border-box;
+      font-size: 11px;
+      overflow-y: auto;
+      pointer-events: auto;
+    }
+    .review-panel h3 { margin: 0 0 6px 0; font-size: 13px; color: #fff; border-bottom: 1px solid #444; padding-bottom: 4px; }
+    .pos-title { color: #4caf50; font-weight: bold; margin-top: 4px; }
+    .neg-title { color: #ff5252; font-weight: bold; margin-top: 8px; }
+    .review-text { color: #ddd; margin: 2px 0 6px 0; line-height: 1.3; }
+
+    /* 右側：商品情報・比較パネル */
+    .info-panel {
+      position: absolute;
+      top: 80px; right: 10px;
+      width: 48%;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 10px;
+      box-sizing: border-box;
+      pointer-events: auto;
+    }
+    .prod-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
       border-bottom: 1px solid #444;
-      padding-bottom: 10px;
-      margin-bottom: 15px;
+      padding-bottom: 6px;
+      margin-bottom: 8px;
     }
-    .product-title { margin: 0; font-size: 20px; font-weight: bold; }
-    .product-price { font-size: 18px; color: #00ffcc; font-weight: bold; }
+    .prod-name { font-size: 13px; font-weight: bold; margin: 0; }
+    .stars { color: #ffd700; font-size: 10px; }
 
-    /* セクション共通 */
-    .section-title { font-size: 14px; color: #aaa; margin: 0 0 8px 0; }
-    
-    /* 口コミエリア */
-    .review-box {
-      background: rgba(255, 255, 255, 0.1);
-      border-radius: 8px;
-      padding: 10px;
-      margin-bottom: 15px;
-      font-size: 13px;
-    }
-    .good-review { color: #4caf50; font-weight: bold; margin-bottom: 5px; }
-    .bad-review { color: #ff5252; font-weight: bold; margin-top: 10px; margin-bottom: 5px; }
-    .review-text { margin: 0; color: #ddd; line-height: 1.4; }
-
-    /* 比較エリア */
-    .compare-grid {
+    .compare-title { font-size: 11px; color: #ccc; margin: 6px 0 4px 0; }
+    .compare-list {
       display: flex;
-      gap: 10px;
-      overflow-x: auto; /* 横スクロール可能に */
-      padding-bottom: 10px;
+      flex-direction: column;
+      gap: 5px;
     }
-    .compare-item {
-      flex: 0 0 100px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 8px;
-      padding: 8px;
-      text-align: center;
+    .compare-card {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 5px;
+      padding: 4px 6px;
+      font-size: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
     }
-    .compare-item.active { border: 1px solid #00ffcc; background: rgba(0, 255, 204, 0.1); }
-    .compare-name { font-size: 12px; margin: 5px 0; }
-    .compare-price { font-size: 12px; font-weight: bold; color: #fff; margin: 0; }
+    .compare-card.active { border-color: #ff00ff; background: rgba(255, 0, 255, 0.15); }
 
-    /* スキャンボタン */
-    .scan-btn-container {
-      position: absolute;
-      bottom: 30px;
-      left: 0;
-      width: 100%;
-      text-align: center;
-      z-index: 20;
-    }
-    .scan-btn {
-      background: #00ffcc;
-      color: #000;
-      border: none;
-      padding: 15px 40px;
-      border-radius: 30px;
-      font-size: 16px;
-      font-weight: bold;
-      box-shadow: 0 4px 15px rgba(0, 255, 204, 0.4);
-      cursor: pointer;
-    }
-    .scan-btn:active { transform: scale(0.95); }
-
-    /* 閉じるボタン */
-    .close-btn {
-      position: absolute;
-      top: 15px; right: 20px;
-      background: none; border: none;
-      color: #888; font-size: 24px;
-      cursor: pointer;
+    /* レスポンシブ調整（小さめのスマホ画面用） */
+    @media (max-width: 380px) {
+      .review-panel, .info-panel { font-size: 10px; padding: 6px; }
+      .prod-name { font-size: 11px; }
     }
   </style>
 </head>
 <body>
 
-  <!-- カメラコンテナ -->
-  <div class="camera-container">
-    <video id="webcam" autoplay playsinline></video>
-    <div id="scan-frame" class="scan-frame"></div>
-  </div>
+<div class="container">
+  <!-- カメラ映像 -->
+  <video id="webcam" autoplay playsinline muted></video>
+  
+  <!-- トラッキング枠を描画するキャンバス -->
+  <canvas id="tracker-canvas"></canvas>
 
-  <!-- スキャンボタン -->
-  <div class="scan-btn-container" id="btn-container">
-    <button class="scan-btn" onclick="startScan()">商品をスキャン</button>
-  </div>
+  <!-- ステータス表示 -->
+  <div class="status-bar" id="status-text">AIモデル読み込み中...</div>
 
-  <!-- 結果表示パネル（画面下部からスライドアップ） -->
-  <div id="info-panel" class="info-overlay">
-    <button class="close-btn" onclick="closePanel()">×</button>
-    
-    <div class="product-header">
-      <h2 class="product-title" id="p-title">商品名</h2>
-      <span class="product-price" id="p-price">¥0</span>
-    </div>
-
-    <!-- 口コミ -->
-    <h3 class="section-title">購入者の声</h3>
-    <div class="review-box">
-      <div class="good-review">👍 良い口コミ</div>
-      <p class="review-text" id="p-good">ここに良い評価が入ります。</p>
+  <!-- 最初に見せていただいたモックアップ風オーバーレイUI -->
+  <div class="ar-overlay" id="ar-overlay">
+    <!-- 左：口コミ -->
+    <div class="review-panel">
+      <h3>▼ 口コミ</h3>
+      <div class="pos-title">★ 肯定的なレビュー</div>
+      <p class="review-text" id="pos-review">一口サイズで食べやすい！サクサクで美味しい。</p>
       
-      <div class="bad-review">👎 イマイチな口コミ</div>
-      <p class="review-text" id="p-bad">ここに悪い評価が入ります。</p>
+      <div class="neg-title">☆ 否定的なレビュー</div>
+      <p class="review-text" id="neg-review">少しパサつきが気になるかも。</p>
     </div>
 
-    <!-- 比較 -->
-    <h3 class="section-title">類似商品との比較</h3>
-    <div class="compare-grid" id="compare-container">
-      <!-- JSで中身を生成 -->
+    <!-- 右：比較・詳細 -->
+    <div class="info-panel">
+      <div class="prod-header">
+        <h2 class="prod-name" id="prod-name">チョコあ～んぱん</h2>
+        <div class="stars">★★★★★</div>
+      </div>
+
+      <div class="compare-title">▼ 比較を選択</div>
+      <div class="compare-list" id="compare-list">
+        <div class="compare-card active">
+          <span>チョコあ～んぱん</span>
+          <b>¥108</b>
+        </div>
+        <div class="compare-card">
+          <span>たけのこの里</span>
+          <b>¥200</b>
+        </div>
+        <div class="compare-card">
+          <span>コアラのマーチ</span>
+          <b>¥120</b>
+        </div>
+      </div>
     </div>
   </div>
+</div>
 
 <script>
-  // --- 1. カメラの起動 ---
   const video = document.getElementById('webcam');
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-    .then(stream => { video.srcObject = stream; })
-    .catch(err => { console.error("カメラエラー:", err); alert("カメラの許可が必要です"); });
+  const canvas = document.getElementById('tracker-canvas');
+  const ctx = canvas.getContext('2d');
+  const statusText = document.getElementById('status-text');
+  const arOverlay = document.getElementById('ar-overlay');
 
-  // --- 2. 商品データベース（疑似AIスキャン用） ---
-  const productDatabase = [
-    {
-      title: "チョコあ〜んぱん", price: "¥108",
-      good: "「一口サイズで食べやすい！サクサクで美味しい。」<br>「小腹が空いた時にぴったり。」",
-      bad: "「少しパサつきが気になるかも。」<br>「内容量がもう少し欲しい。」",
-      compares: [
-        { name: "チョコあ〜んぱん", price: "¥108", active: true },
-        { name: "たけのこの里", price: "¥200", active: false },
-        { name: "コアラのマーチ", price: "¥120", active: false }
-      ]
-    },
-    {
-      title: "じゃがりこ サラダ", price: "¥160",
-      good: "「安定の美味しさ！カリカリ食感がたまらない。」<br>「手が汚れにくくて食べやすい。」",
-      bad: "「硬すぎて歯茎に刺さることがある。」<br>「底のほうが少し取り出しにくい。」",
-      compares: [
-        { name: "じゃがりこ サラダ", price: "¥160", active: true },
-        { name: "じゃがビー", price: "¥140", active: false },
-        { name: "ポテトチップス", price: "¥150", active: false }
-      ]
-    },
-    {
-      title: "コカ・コーラ 500ml", price: "¥160",
-      good: "「炭酸が強くてリフレッシュに最高！」<br>「ピザやジャンクフードに一番合う。」",
-      bad: "「糖分が多いので飲みすぎ注意。」<br>「ぬるくなると美味しくない。」",
-      compares: [
-        { name: "コカ・コーラ", price: "¥160", active: true },
-        { name: "ペプシコーラ", price: "¥150", active: false },
-        { name: "ドクターペッパー", price: "¥140", active: false }
-      ]
+  let model = null;
+
+  // 1. カメラのセットアップ
+  async function setupCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      return new Promise((resolve) => {
+        video.onloadedmetadata = () => { resolve(video); };
+      });
+    } catch (err) {
+      statusText.innerText = "カメラの起動に失敗しました";
+      console.error(err);
     }
-  ];
-
-  // --- 3. スキャン実行処理 ---
-  function startScan() {
-    const frame = document.getElementById('scan-frame');
-    const panel = document.getElementById('info-panel');
-    const btnBox = document.getElementById('btn-container');
-
-    // スキャン中の演出（枠を光らせる）
-    frame.classList.add('active');
-    
-    // AIが解析している風のローディング時間（1秒）
-    setTimeout(() => {
-      frame.classList.remove('active');
-      btnBox.style.display = 'none'; // ボタンを隠す
-      
-      // ランダムに商品データを1つ選ぶ（疑似スキャン）
-      const randomProduct = productDatabase[Math.floor(Math.random() * productDatabase.length)];
-      
-      // 画面にデータを流し込む
-      document.getElementById('p-title').innerText = randomProduct.title;
-      document.getElementById('p-price').innerText = randomProduct.price;
-      document.getElementById('p-good').innerHTML = randomProduct.good;
-      document.getElementById('p-bad').innerHTML = randomProduct.bad;
-
-      // 比較データの生成
-      const compareHtml = randomProduct.compares.map(item => `
-        <div class="compare-item ${item.active ? 'active' : ''}">
-          <div class="compare-name">${item.name}</div>
-          <div class="compare-price">${item.price}</div>
-        </div>
-      `).join('');
-      document.getElementById('compare-container').innerHTML = compareHtml;
-
-      // パネルを下からスライド表示
-      panel.classList.add('show');
-    }, 1000);
   }
 
-  // --- 4. パネルを閉じる処理 ---
-  function closePanel() {
-    document.getElementById('info-panel').classList.remove('show');
-    setTimeout(() => {
-      document.getElementById('btn-container').style.display = 'block'; // ボタン復活
-    }, 300);
+  // 2. 物体認識・トラッキングループ
+  async function detectObjects() {
+    // 画面サイズにキャンバスを合わせる
+    canvas.width = video.clientWidth;
+    canvas.height = video.clientHeight;
+
+    // AIでカメラ映像内の物体を検出
+    const predictions = await model.detect(video);
+
+    // キャンバスをクリア
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (predictions.length > 0) {
+      statusText.innerText = "🎯 ターゲット検出・追従中";
+      arOverlay.style.display = "block"; // オーバーレイUIを表示
+
+      // 最も確信度が高い物体をメインターゲットにする
+      const primary = predictions[0];
+      
+      // 映像の比率に合わせてバウンディングボックスの座標を変換
+      const scaleX = canvas.width / video.videoWidth;
+      const scaleY = canvas.height / video.videoHeight;
+
+      const x = primary.bbox[0] * scaleX;
+      const y = primary.bbox[1] * scaleY;
+      const width = primary.bbox[2] * scaleX;
+      const height = primary.bbox[3] * scaleY;
+
+      // --- 四角いトラッキング枠（ピンクの蛍光枠）の描画 ---
+      ctx.strokeStyle = '#ff00ff';
+      ctx.lineWidth = 4;
+      ctx.shadowColor = '#ff00ff';
+      ctx.shadowBlur = 10;
+      ctx.strokeRect(x, y, width, height);
+
+      // 角のアクセントを描画（AR風演出）
+      const cornerLength = 15;
+      ctx.strokeStyle = '#00ffcc';
+      ctx.lineWidth = 5;
+      // 左上角
+      ctx.beginPath(); ctx.moveTo(x, y + cornerLength); ctx.lineTo(x, y); ctx.lineTo(x + cornerLength, y); ctx.stroke();
+      // 右上角
+      ctx.beginPath(); ctx.moveTo(x + width - cornerLength, y); ctx.lineTo(x + width, y); ctx.lineTo(x + width, y + cornerLength); ctx.stroke();
+      // 左下角
+      ctx.beginPath(); ctx.moveTo(x, y + height - cornerLength); ctx.lineTo(x, y + height); ctx.lineTo(x + cornerLength, y + height); ctx.stroke();
+      // 右下角
+      ctx.beginPath(); ctx.moveTo(x + width - cornerLength, y + height); ctx.lineTo(x + width, y + height); ctx.lineTo(x + width, y + height - cornerLength); ctx.stroke();
+
+      // 検出したモノに合わせてテキストを更新（※例: bottle, cup, book等）
+      updateUIData(primary.class);
+
+    } else {
+      statusText.innerText = "🔍 カメラにモノ（お菓子、ボトル等）を映してください";
+      // 検出されないときは枠とUIを非表示
+      arOverlay.style.display = "none";
+    }
+
+    // 次のフレームで再検出（ループ）
+    requestAnimationFrame(detectObjects);
   }
+
+  // 3. 検出されたモノのラベルに応じて表示UIを書き換える
+  function updateUIData(detectedClass) {
+    const nameEl = document.getElementById('prod-name');
+    const posEl = document.getElementById('pos-review');
+    const negEl = document.getElementById('neg-review');
+
+    // 検出されたオブジェクト名に応じてデータを疑似切り替え
+    if (detectedClass === 'bottle' || detectedClass === 'cup') {
+      nameEl.innerText = "コカ・コーラ 500ml";
+      posEl.innerText = "炭酸が強くてリフレッシュに最高！";
+      negEl.innerText = "糖分が多いので飲みすぎ注意。";
+    } else if (detectedClass === 'cell phone' || detectedClass === 'book') {
+      nameEl.innerText = "チョコあ～んぱん";
+      posEl.innerText = "一口サイズで食べやすい！サクサクで美味しい。";
+      negEl.innerText = "少しパサつきが気になるかも。";
+    } else {
+      nameEl.innerText = detectedClass.toUpperCase() + " (検出物)";
+      posEl.innerText = "高評価：使い勝手が良く満足度が高い製品です。";
+      negEl.innerText = "低評価：やや価格が高いと感じる人がいるようです。";
+    }
+  }
+
+  // 4. アプリ起動処理
+  async function init() {
+    await setupCamera();
+    statusText.innerText = "AIモデル（COCO-SSD）を起動中...";
+    // TensorFlow物体検出モデルのロード
+    model = await cocoSsd.load();
+    statusText.innerText = "🔍 カメラにモノを映してください";
+    detectObjects();
+  }
+
+  window.onload = init;
 </script>
 
 </body>
